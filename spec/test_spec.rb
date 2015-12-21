@@ -28,11 +28,11 @@ describe 'tarball::test' do
 
   it 'calls tarball' do
     expect(chef_run).to extract_tarball('/tmp/testing.tgz')
+    expect(chef_run).to extract_tarball('test3 excluding')
   end
 
   it 'calls tarball_x' do
     expect(chef_run).to extract_tarball_x('test2')
-    expect(chef_run).to extract_tarball_x('test3 excluding')
     expect(chef_run).to extract_tarball_x('test4 strip_components')
   end
 
@@ -71,10 +71,10 @@ describe 'tarball::test' do
   end
 
   it 'creates extraction dirs' do
-    expect(chef_run).to create_directory('/tmp/testing1')
-    expect(chef_run).to create_directory('/tmp/testing2')
-    expect(chef_run).to create_directory('/tmp/testing3')
-    expect(chef_run).to create_directory('/tmp/testing4')
+    expect(chef_run).to create_directory('/tmp/testing1/')
+    expect(chef_run).to create_directory('/tmp/testing2/')
+    expect(chef_run).to create_directory('/tmp/testing3/')
+    expect(chef_run).to create_directory('/tmp/testing4/')
   end
 
   it 'creates extracted files as expected' do
@@ -95,30 +95,61 @@ describe 'tarball::test' do
   end
 
   it 'creates a bunch of directories' do
-    %w( /tmp/testing1 /tmp/testing2 ).each do |t|
-      %w(
-        testing
-        testing/a
-        testing/a/b
-        testing/a/b/c
-        testing/a/b/d
-        testing/e
-        testing/e/f
-        testing/e/g
-        testing/e/h
-        testing/e/h/i
-        testing/e/h/i/j
-        testing/e/h/i/j/k
-        testing/e/h/i/j/k/l
-        testing/e/h/i/j/k/l/m
-        testing/e/h/i/j/k/l/m/n
-        testing/e/h/i/j/k/l/m/n/o
-        testing/e/h/i/j/k/l/m/n/o/p
-        testing/e/h/i/j/k/l/m/n/o/p/q
-        testing/e/h/i/j/k/l/m/n/o/p/q/r
-      ).each do |d|
-        expect(chef_run).to create_directory("#{t}/#{d}")
-      end
+    t = '/tmp/testing1'
+    %w(
+      testing/
+      testing/a/
+      testing/a/b/
+      testing/a/b/c/
+      testing/a/b/d/
+      testing/e/
+      testing/e/f/
+      testing/e/g/
+      testing/e/h/
+      testing/e/h/i/
+      testing/e/h/i/j/
+      testing/e/h/i/j/k/
+      testing/e/h/i/j/k/l/
+      testing/e/h/i/j/k/l/m/
+      testing/e/h/i/j/k/l/m/n/
+      testing/e/h/i/j/k/l/m/n/o/
+      testing/e/h/i/j/k/l/m/n/o/p/
+      testing/e/h/i/j/k/l/m/n/o/p/q/
+      testing/e/h/i/j/k/l/m/n/o/p/q/r/
+    ).each do |d|
+      expect(chef_run).to create_directory("#{t}/#{d}")
+    end
+  end
+
+  it 'only creates directories that are a part of the extract_list' do
+    t = '/tmp/testing2'
+    %w(
+      testing/
+      testing/a/
+      testing/a/b/
+    ).each do |d|
+      expect(chef_run).to create_directory("#{t}/#{d}")
+    end
+
+    %w(
+      testing/a/b/c/
+      testing/a/b/d/
+      testing/e/
+      testing/e/f/
+      testing/e/g/
+      testing/e/h/
+      testing/e/h/i/
+      testing/e/h/i/j/
+      testing/e/h/i/j/k/
+      testing/e/h/i/j/k/l/
+      testing/e/h/i/j/k/l/m/
+      testing/e/h/i/j/k/l/m/n/
+      testing/e/h/i/j/k/l/m/n/o/
+      testing/e/h/i/j/k/l/m/n/o/p/
+      testing/e/h/i/j/k/l/m/n/o/p/q/
+      testing/e/h/i/j/k/l/m/n/o/p/q/r/
+    ).each do |d|
+      expect(chef_run).to_not create_directory("#{t}/#{d}")
     end
   end
 
@@ -165,33 +196,33 @@ describe 'tarball::test' do
   it 'excludes some files' do
     exclude_dir = '/tmp/testing3'
     %w(
-      testing
-      testing/a
-      testing/a/b
-      testing/a/b/c
-      testing/a/b/d
-      testing/e
-      testing/e/f
-      testing/e/g
-      testing/e/h
-      testing/e/h/i
-      testing/e/h/i/j
-      testing/e/h/i/j/k
-      testing/e/h/i/j/k/l
-      testing/e/h/i/j/k/l/m
-      testing/e/h/i/j/k/l/m/n
-      testing/e/h/i/j/k/l/m/n/o
-      testing/e/h/i/j/k/l/m/n/o/p
+      testing/
+      testing/a/
+      testing/a/b/
+      testing/a/b/c/
+      testing/a/b/d/
+      testing/e/
+      testing/e/f/
+      testing/e/g/
+      testing/e/h/
+      testing/e/h/i/
+      testing/e/h/i/j/
+      testing/e/h/i/j/k/
+      testing/e/h/i/j/k/l/
+      testing/e/h/i/j/k/l/m/
+      testing/e/h/i/j/k/l/m/n/
+      testing/e/h/i/j/k/l/m/n/o/
+      testing/e/h/i/j/k/l/m/n/o/p/
     ).each do |d|
       expect(chef_run).to create_directory("#{exclude_dir}/#{d}")
     end
 
     %w(
-      testing/a/2
-      testing/e/h/3
-      testing/e/h/i/j/k/l/m/n/o/p/q
-      testing/e/h/i/j/k/l/m/n/o/p/q/r
-      testing/e/h/i/j/k/l/m/n/o/p/q/r/3
+      testing/a/2/
+      testing/e/h/3/
+      testing/e/h/i/j/k/l/m/n/o/p/q/
+      testing/e/h/i/j/k/l/m/n/o/p/q/r/
+      testing/e/h/i/j/k/l/m/n/o/p/q/r/3/
     ).each do |d|
       expect(chef_run).to_not create_directory("#{exclude_dir}/#{d}")
     end
@@ -232,30 +263,33 @@ describe 'tarball::test' do
   it 'strips components' do
     dir = '/tmp/testing4'
     %w(
-      b
-      b/c
-      b/d
-      f
-      g
-      h
-      h/i
-      h/i/j
-      h/i/j/k
-      h/i/j/k/l
-      h/i/j/k/l/m
-      h/i/j/k/l/m/n
-      h/i/j/k/l/m/n/o
-      h/i/j/k/l/m/n/o/p
-      h/i/j/k/l/m/n/o/p/q
-      h/i/j/k/l/m/n/o/p/q/r
+
+      b/
+      b/c/
+      b/d/
+      f/
+      g/
+      h/
+      h/i/
+      h/i/j/
+      h/i/j/k/
+      h/i/j/k/l/
+      h/i/j/k/l/m/
+      h/i/j/k/l/m/n/
+      h/i/j/k/l/m/n/o/
+      h/i/j/k/l/m/n/o/p/
+      h/i/j/k/l/m/n/o/p/q/
+      h/i/j/k/l/m/n/o/p/q/r/
     ).each do |d|
       expect(chef_run).to create_directory("#{dir}/#{d}")
     end
 
     %w(
-      testing
-      testing/a
-      testing/e
+      a/
+      e/
+      testing/
+      testing/a/
+      testing/e/
     ).each do |d|
       expect(chef_run).to_not create_directory("#{dir}/#{d}")
     end

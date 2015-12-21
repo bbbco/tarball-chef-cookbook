@@ -18,13 +18,15 @@ provides :tarball if self.respond_to?('provides')
 
 def initialize(*args)
   super
-  @created_files = created_files
+  @created_files = files[:created]
+  @all_files = files[:all]
+  @filtered_files = files[:filtered]
 end
 
 attribute :name, kind_of: String, name_attribute: true
 attribute :source, kind_of: String
 attribute :destination, kind_of: String, required: true
-attribute :extract_list, kind_of: [Array, String]
+attribute :extract_list, kind_of: [Array, String], default: ['**/*']
 attribute :owner, kind_of: String
 attribute :group, kind_of: String
 attribute :mode, kind_of: [String, Integer]
@@ -34,4 +36,4 @@ attribute :exclude, kind_of: [Array, String]
 attribute :strip_components, kind_of: [Integer]
 
 # This attribute is *not* meant to be passed as in the tarball_x block
-attribute :created_files, kind_of: Array, default: []
+attribute :files, kind_of: Hash, default: {}

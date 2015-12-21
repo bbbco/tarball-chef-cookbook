@@ -22,24 +22,31 @@ end
 use_inline_resources
 
 def t_open(tarfile)
-  ::File.open(tarfile, 'rb')
-rescue StandardError => e
-  Chef::Log.warn e.message
-  raise e
+  begin
+    tarball = ::File.open(tarfile, 'rb')
+  rescue StandardError => e
+    Chef::Log.warn e.message
+    raise e
+  end
+  begin
+    tarball_gz = Zlib::GzipReader.new(tarball)
+  rescue Zlib::GzipFile::Error
+    # Not gzipped
+    tarball = t_rewind(tarball)
+  end
+  tarball_gz || tarball
 end
 
-def t_stream(tarball)
-  tarball_gz = Zlib::GzipReader.new(tarball)
-rescue Zlib::GzipFile::Error
-  # Not gzipped
+def t_read(tarball)
+  Gem::Package::TarReader.new(tarball)
+end
+
+def t_rewind(tarball)
   tarball.rewind
   tarball
-else
-  tarball_gz
 end
 
 def mkdir(destination, owner = nil, group = nil, mode = nil)
-  return if destination.nil?
   directory destination do
     action :create
     owner owner unless owner.nil?
@@ -50,7 +57,8 @@ def mkdir(destination, owner = nil, group = nil, mode = nil)
 end
 
 def mkdestdir(tarball_resource)
-  dest = tarball_resource.destination
+  dest = ::File.join(tarball_resource.destination, ::File::SEPARATOR)
+  return if dest.empty? || ::File.directory?(dest)
   owner = tarball_resource.owner
   group = tarball_resource.group
   # We use octal here for UNIX file mode readability, but we could just
@@ -60,31 +68,28 @@ def mkdestdir(tarball_resource)
   tarball_resource.updated_by_last_action(true)
 end
 
-# Placeholder method in case someone actually needs PAX support
-def pax_handler(pax)
-  Chef::Log.debug("PAX: #{pax}") if pax
-end
-
-def t_mkdir(tarball_resource, entry, pax, name = nil)
+def t_mkdir(tarball_resource, entry, pax)
   pax_handler(pax)
-  if name.nil?
-    dir = get_tar_entry_path(tarball_resource, entry.full_name)
-    dir = ::File.join(tarball_resource.destination, dir)
-    dir = dir.gsub(%r{/$}, '')
-  else
-    dir = name
-  end
-  return if dir.empty? || ::File.directory?(dir)
+  dir = get_tar_entry_path(tarball_resource, entry.full_name)
+  return if dir.empty?
+  dir = ::File.join(tarball_resource.destination, dir, ::File::SEPARATOR)
+  return if ::File.directory?(dir)
   owner = tarball_resource.owner || entry.header.uid
   group = tarball_resource.group || entry.header.gid
   mode = tarball_resource.mode || lambda do
     (fix_mode(entry.header.mode) | 0111) & ~tarball_resource.umask.to_i
   end.call
-
   mkdir(dir, owner, group, mode)
+  tarball_resource.files[:created][:directories] << dir
+  tarball_resource.updated_by_last_action(true)
 end
 
-def get_target(tarball_resource, entry, type)
+# Placeholder method in case someone actually needs PAX support
+def pax_handler(pax)
+  Chef::Log.debug("PAX: #{pax}") if pax
+end
+
+def get_link_target(tarball_resource, entry, type)
   if type == :symbolic
     entry.header.linkname
   else
@@ -98,23 +103,18 @@ def get_tar_entry_path(tarball_resource, full_path)
     paths = Pathname.new(full_path)
             .each_filename
             .drop(tarball_resource.strip_components)
-    if paths.empty?
-      full_path = ''
-    else
-      full_path = ::File.join(paths)
-    end
+    full_path = ::File.join(paths)
   end
   full_path
 end
 
 def t_link(tarball_resource, entry, type, pax, longname)
   pax_handler(pax)
-  dir = tarball_resource.destination
-  t_mkdir(tarball_resource, entry, pax, dir)
-  target = get_target(tarball_resource, entry, type)
+  target = get_link_target(tarball_resource, entry, type)
 
   if type == :hard &&
-     !(::File.exist?(target) || tarball_resource.created_files.include?(target))
+     !(::File.exist?(target) ||
+     tarball_resource.files[:created][:files].include?(target))
     Chef::Log.debug "Skipping #{entry.full_name}: #{target} not found"
     return
   end
@@ -122,14 +122,15 @@ def t_link(tarball_resource, entry, type, pax, longname)
   filename = longname || entry.full_name
   src = get_tar_entry_path(tarball_resource, filename)
   return if src.empty?
-  src = ::File.join(dir, src)
-  t_mkdir(tarball_resource, entry, pax, ::File.dirname(src))
+  src = ::File.join(tarball_resource.destination, src)
   link src do
     to target
     owner tarball_resource.owner || entry.header.uid
     link_type type
     action :create
   end
+  tarball_resource.files[:created][:links] << src
+  tarball_resource.updated_by_last_action(true)
 end
 
 def t_file(tarball_resource, entry, pax, longname)
@@ -139,7 +140,6 @@ def t_file(tarball_resource, entry, pax, longname)
   return if fqpn.empty?
   fqpn = ::File.join(tarball_resource.destination, fqpn)
   Chef::Log.info "Creating file #{fqpn}"
-  t_mkdir(tarball_resource, entry, pax, ::File.dirname(fqpn))
   file fqpn do
     action :create
     owner tarball_resource.owner || entry.header.uid
@@ -149,7 +149,8 @@ def t_file(tarball_resource, entry, pax, longname)
     sensitive true
     content entry.read
   end
-  tarball_resource.created_files << fqpn
+  tarball_resource.files[:created][:files] << fqpn
+  tarball_resource.updated_by_last_action(true)
 end
 
 def exclude?(filename, tarball_resource)
@@ -167,18 +168,36 @@ def on_list?(filename, tarball_resource)
 end
 
 def wanted?(filename, tarball_resource, type)
-  if tarball_resource.exclude
-    return false if exclude?(filename, tarball_resource)
-  end
   if ::File.exist?(::File.join(tarball_resource.destination, filename)) &&
      tarball_resource.overwrite == false
     false
-  elsif %w(2 5 L).include?(type)
+  elsif %w(2 L).include?(type)
     true
-  elsif tarball_resource.extract_list
-    on_list?(filename, tarball_resource)
   else
-    true
+    tarball_resource.files[:filtered].include?(filename)
+  end
+end
+
+def t_list(tarball, tarball_resource)
+  tarball.each do |entry|
+    f = entry.full_name
+    next if f.include?('PaxHeader')
+    tarball_resource.files[:all] << f
+    next unless on_list?(f, tarball_resource) &&
+                !exclude?(f, tarball_resource)
+    paths = []
+    Pathname(f).ascend { |e| paths << e.to_s }
+    paths.map! do |p|
+      if paths.first.eql?(p)
+        p
+      else
+        p + ::File::SEPARATOR
+      end
+    end
+    tarball_resource.files[:filtered] += paths
+  end
+  %i(all filtered).each do |type|
+    tarball_resource.files[type] = tarball_resource.files[type].uniq
   end
 end
 
@@ -186,7 +205,7 @@ def t_extraction(tarball, tarball_resource)
   # pax and longname track extended types that span more than one tar entry
   pax = nil
   longname = nil
-  Gem::Package::TarReader.new(tarball).each do |entry|
+  tarball.each do |entry|
     unless wanted?(entry.full_name, tarball_resource, entry.header.typeflag)
       next
     end
@@ -228,15 +247,44 @@ def fix_mode(mode)
   # GNU tar doesn't store the mode POSIX style, so we fix it
   mode > 07777.to_i ? mode.to_s(8).slice(-4, 4).to_i(8) : mode
 end
+  require 'pry'
+
+def init_files(new_resource)
+  new_resource.files[:all] = []
+  new_resource.files[:filtered] = []
+  new_resource.files[:created] = {}
+  new_resource.files[:created][:files] = []
+  new_resource.files[:created][:links] = []
+  new_resource.files[:created][:directories] = []
+  new_resource
+end
+
+def do_tarball(resource_action)
+  @new_resource = init_files(@new_resource)
+  Chef::Log.info "TARFILE: #{new_resource.source || new_resource.name}"
+  tarball = t_open(new_resource.source || new_resource.name)
+  tarball = t_rewind(tarball)
+  tarball = t_read(tarball)
+  t_list(tarball, new_resource)
+  if resource_action.eql?(:extract)
+    tarball = t_rewind(tarball)
+    mkdestdir(new_resource)
+    t_extraction(tarball, new_resource)
+    new_resource.updated_by_last_action(true)
+  end
+  tarball.close
+  created_files = new_resource.files[:created]
+  new_resource.files[:created][:all] = created_files[:files] +
+                                       created_files[:links] +
+                                       created_files[:directories]
+end
 
 provides :tarball if self.respond_to?('provides')
 
 action :extract do
-  tarball_resource = new_resource
-  Chef::Log.info "TARFILE: #{tarball_resource.source || tarball_resource.name}"
-  tarball = t_open(tarball_resource.source || tarball_resource.name)
-  tarball = t_stream(tarball)
-  mkdestdir(tarball_resource)
-  t_extraction(tarball, tarball_resource)
-  new_resource.updated_by_last_action(true)
+  do_tarball(:extract)
+end
+
+action :list do
+  do_tarball(:list)
 end

@@ -47,7 +47,7 @@ tarball_x 'test2' do
   action :extract
 end
 
-tarball_x 'test3 excluding' do
+tarball 'test3 excluding' do
   source lazy { "/tmp/#{file}" }
   destination '/tmp/testing3'
   owner 'root'
