@@ -64,8 +64,10 @@ def mkdestdir(tarball_resource)
   # We use octal here for UNIX file mode readability, but we could just
   # as easily have used decimal 511 and gotten the correct behavior
   mode = 0777 & ~tarball_resource.umask.to_i
-  mkdir(dest, owner, group, mode)
-  tarball_resource.updated_by_last_action(true)
+  converge_by("creating destination directory #{dest}") do
+    mkdir(dest, owner, group, mode)
+    tarball_resource.updated_by_last_action(true)
+  end
 end
 
 def t_mkdir(tarball_resource, entry, pax)
@@ -79,9 +81,11 @@ def t_mkdir(tarball_resource, entry, pax)
   mode = tarball_resource.mode || lambda do
     (fix_mode(entry.header.mode) | 0111) & ~tarball_resource.umask.to_i
   end.call
-  mkdir(dir, owner, group, mode)
-  tarball_resource.files[:created][:directories] << dir
-  tarball_resource.updated_by_last_action(true)
+  converge_by("extracting directory #{dir}") do
+    mkdir(dir, owner, group, mode)
+    tarball_resource.files[:created][:directories] << dir
+    tarball_resource.updated_by_last_action(true)
+  end
 end
 
 # Placeholder method in case someone actually needs PAX support
@@ -123,14 +127,16 @@ def t_link(tarball_resource, entry, type, pax, longname)
   src = get_tar_entry_path(tarball_resource, filename)
   return if src.empty?
   src = ::File.join(tarball_resource.destination, src)
-  link src do
-    to target
-    owner tarball_resource.owner || entry.header.uid
-    link_type type
-    action :create
+  converge_by("extracting #{type} link #{src}, which points to #{target}") do
+    link src do
+      to target
+      owner tarball_resource.owner || entry.header.uid
+      link_type type
+      action :create
+    end
+    tarball_resource.files[:created][:links] << src
+    tarball_resource.updated_by_last_action(true)
   end
-  tarball_resource.files[:created][:links] << src
-  tarball_resource.updated_by_last_action(true)
 end
 
 def t_file(tarball_resource, entry, pax, longname)
@@ -139,18 +145,19 @@ def t_file(tarball_resource, entry, pax, longname)
   fqpn = get_tar_entry_path(tarball_resource, fqpn)
   return if fqpn.empty?
   fqpn = ::File.join(tarball_resource.destination, fqpn)
-  Chef::Log.info "Creating file #{fqpn}"
-  file fqpn do
-    action :create
-    owner tarball_resource.owner || entry.header.uid
-    group tarball_resource.group || entry.header.gid
-    mode tarball_resource.mode ||
-      fix_mode(entry.header.mode) & ~tarball_resource.umask.to_i
-    sensitive true
-    content entry.read
+  converge_by("extracting file #{fqpn}") do
+    file fqpn do
+      action :create
+      owner tarball_resource.owner || entry.header.uid
+      group tarball_resource.group || entry.header.gid
+      mode tarball_resource.mode ||
+        fix_mode(entry.header.mode) & ~tarball_resource.umask.to_i
+      sensitive true
+      content entry.read
+    end
+    tarball_resource.files[:created][:files] << fqpn
+    tarball_resource.updated_by_last_action(true)
   end
-  tarball_resource.files[:created][:files] << fqpn
-  tarball_resource.updated_by_last_action(true)
 end
 
 def exclude?(filename, tarball_resource)
