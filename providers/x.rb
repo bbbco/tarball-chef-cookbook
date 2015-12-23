@@ -254,7 +254,6 @@ def fix_mode(mode)
   # GNU tar doesn't store the mode POSIX style, so we fix it
   mode > 07777.to_i ? mode.to_s(8).slice(-4, 4).to_i(8) : mode
 end
-  require 'pry'
 
 def init_files(new_resource)
   new_resource.files[:all] = []
